@@ -62,29 +62,27 @@ logging.basicConfig(
     ]
 )
 
-def process_ticker(ticker, mongo_client):
+def process_ticker(ticker, mongo_client,stock_client):
    try:
       
       current_price = None
       
       while current_price is None:
          try:
-            current_price = get_latest_price(ticker)
+            current_price = get_latest_price(ticker,stock_client)
          except Exception as fetch_error:
             logging.warning(f"Error fetching price for {ticker}. Retrying... {fetch_error}")
             time.sleep(10)
-      
-      indicator_tb = mongo_client.IndicatorsDatabase
-      indicator_collection = indicator_tb.Indicators
+      while historical_data is None:
+         try:
+            
+            historical_data = get_data(ticker)
+         except Exception as fetch_error:
+            logging.warning(f"Error fetching historical data for {ticker}. Retrying... {fetch_error}")
+            time.sleep(10)
+
       for strategy in strategies:
-         historical_data = None
-         while historical_data is None:
-            try:
-               period = indicator_collection.find_one({'indicator': strategy.__name__})
-               historical_data = get_data(ticker, mongo_client, period['ideal_period'])
-            except Exception as fetch_error:
-               logging.warning(f"Error fetching historical data for {ticker}. Retrying... {fetch_error}")
-               time.sleep(60)
+            
          db = mongo_client.trading_simulator  
          holdings_collection = db.algorithm_holdings
          print(f"Processing {strategy.__name__} for {ticker}")
@@ -254,7 +252,7 @@ def update_portfolio_values(client):
    still need to implement.
    we go through each strategy and update portfolio value buy cash + summation(holding * current price)
    """
-   
+   stock_client = StockHistoricalDataClient(API_KEY, API_SECRET)
    db = client.trading_simulator  
    holdings_collection = db.algorithm_holdings
    # Update portfolio values
@@ -274,7 +272,6 @@ def update_portfolio_values(client):
           current_price = None
           while current_price is None:
             try:
-               # get latest price shouldn't cache - we should also do a delay
                current_price = get_latest_price(ticker)
             except:
                print(f"Error fetching price for {ticker}. Retrying...")
@@ -350,7 +347,9 @@ def main():
    
    while True: 
       mongo_client = MongoClient(mongo_url, tlsCAFile=ca)
+      stock_client=StockHistoricalDataClient(api_key=API_KEY,secret_key=API_SECRET)
       status = mongo_client.market_data.market_status.find_one({})["market_status"]
+      
       
       if status == "open":  
          # Connection pool is not thread safe. Create a new client for each thread.
@@ -365,7 +364,7 @@ def main():
          threads = []
 
          for ticker in ndaq_tickers:
-            thread = threading.Thread(target=process_ticker, args=(ticker, mongo_client))
+            thread = threading.Thread(target=process_ticker, args=(ticker, mongo_client,stock_client))
             threads.append(thread)
             thread.start()
 
